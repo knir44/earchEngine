@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.handson.searchengine.kafka.Producer;
 import com.handson.searchengine.model.*;
+import com.handson.searchengine.util.ElasticSearch;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.jsoup.Jsoup;
@@ -33,6 +34,9 @@ public class Crawler {
 
     @Autowired
     Producer producer;
+
+    @Autowired
+    ElasticSearch elasticSearch;
     protected final Log logger = LogFactory.getLog(getClass());
 
 
@@ -44,7 +48,7 @@ public class Crawler {
         producer.send(CrawlerRecord.of(crawlId, crawlerRequest));
     }
 
-    public   void CrawlOneRecord(String crawlId,CrawlerRecord rec) throws IOException, InterruptedException {
+    public  void CrawlOneRecord(String crawlId,CrawlerRecord rec) throws IOException, InterruptedException {
 
         logger.info("crawling url:" + rec.getUrl());
         StopReason stopReason = getStopReason(rec);
@@ -52,6 +56,7 @@ public class Crawler {
 
         if(stopReason == null){
             Document webPageContent = Jsoup.connect(rec.getUrl()).get();
+            indexElasticSearch(rec,webPageContent);
             List<String> innerUrls = extractWebPageUrls(rec.getBaseUrl(), webPageContent);
             addUrlsToQueue(rec, innerUrls, rec.getDistance() +1);
         }
@@ -74,8 +79,14 @@ public class Crawler {
             }
         }
     }
-
+    private void indexElasticSearch(CrawlerRecord rec, Document webPageContent) {
+        logger.info(">> adding elastic search for webPage: " + rec.getUrl());
+        String text = String.join(" ", webPageContent.select("a[href]").eachText());
+        UrlSearchDoc searchDoc = UrlSearchDoc.of(rec.getCrawlId(), text, rec.getUrl(), rec.getBaseUrl(), rec.getDistance());
+        elasticSearch.addData(searchDoc);
+    }
     private List<String> extractWebPageUrls(String baseUrl, Document webPageContent) {
+
         List<String> links = webPageContent.select("a[href]")
                 .eachAttr("abs:href")
                 .stream()
